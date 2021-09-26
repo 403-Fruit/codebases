@@ -10,6 +10,7 @@ This picture show how we get the source code.
 <img width="1293" alt="Screen Shot 2021-09-24 at 21 20 37" src="https://user-images.githubusercontent.com/13061304/134693661-e6a53170-505f-44b9-bef0-3c181d6a5d18.png">
 
 
+See the ["Automate saving source code files"](#Automate) section for an easy way to export the source-mapped files
 
 ## Index
 
@@ -127,4 +128,58 @@ _(document how to make a PR is in construction)_
 
 ## Community
 We have a facebook group for update and talking about these codebases.
-Unfortunately, only Vietnamese is supported now. [Click here](https://www.facebook.com/groups/codebases) to visit our group.
+Unfortunately, only Vietnamese is supported now. [Click here](https://www.facebook.com/groups/codebases) to visit our group.  
+
+
+<a name="Automate"></a>
+## Automate saving source code files
+Chrome Devtools does not allow you to save entire folders from the sources tab, but you can automate this process by opening a Devtools window for the Devtools window itself. To do this: 
+- Navigate to `chrome://inspect/#pages` in your browser.  
+- Look for a title like "DevTools - *example.com*" where *example.com* is the target site, and click inspect to open a new Devtools window.  
+- In the new devtools window, use the following snippet to generate a JSON of all the source-mapped files from the target site.  
+    ```javascript
+    let srcMappings = Bindings.resourceMapping.workspace.uiSourceCodes();
+    let srcFiles = Array.prototype.filter.call(srcMappings, (f) => {
+        return !/^(webpack:\/\/\/.\/node_modules|debugger:\/\/|chrome-extension:\/\/)/.test(f.parentURLInternal)
+    });
+
+    await Promise.all(srcFiles.map(async (f) => {
+        let file = await f.requestContent();
+        if (file.content === null) file.content = file.error || "Error loading file";
+
+        let name = f.displayName();
+        if (name === "(index)") name = "index.html";
+        if (/\?/.test(name)) name = name.replace(/\?.*/, "");
+
+        let originName = f.originInternal.replace(/^https?:\/\//, "").replace(/:?[\/\\]+$/g, "").replace(/[\/\\]+/g, "_");
+        return {
+            name: f.displayName(),
+            path: f.parentURLInternal.replace(f.originInternal, ""),
+            content: file.content,
+            origin: originName
+        };
+    }));
+    ```  
+- Copy the JSON output from the previous snippet  
+- Using NodeJS, run the following snippet after modifying it with the JSON copied in the previous step.  
+    ```javascript
+    const srcFiles = {}; // Replace with copied JSON
+    const fs = require("fs");
+    const path = require("path");
+
+    const outDir = "./output";
+    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir);
+
+    srcFiles.forEach((file) => {
+        file.origin = file.origin.replace(/[\\\/\?\|:\*<>]/g, "");
+        file.name = file.name.replace(/\?.*$/g, "").replace(/[\\\/\?\|:\*<>]/g, "");
+        const destDir = path.join(outDir, file.origin, file.path).replace(/[\?\|:\*<>]/g, "");
+
+        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true }); 
+        try {
+            fs.writeFileSync(path.join(destDir, file.name), file.isEncoded ? atob(file.content) : file.content);
+        } catch(e) {
+            console.warn(`Failed writing file '${path.join(destDir, file.name)}' -`, e.message);
+        }
+    });
+    ```
