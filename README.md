@@ -138,11 +138,16 @@ Chrome Devtools does not allow you to save entire folders from the sources tab, 
 - Look for a title like "DevTools - *example.com*" where *example.com* is the target site, and click inspect to open a new Devtools window.  
 - In the new devtools window, use the following snippet to generate a JSON of all the source-mapped files from the target site.  
     ```javascript
-    let srcMappings = Bindings.resourceMapping.workspace.uiSourceCodes();
-    let srcFiles = Array.prototype.filter.call(srcMappings, (f) => {
-        return !/^(webpack:\/\/\/.\/node_modules|debugger:\/\/|chrome-extension:\/\/)/.test(f.parentURLInternal)
-    });
+    // Chrome update made this obsolete
+    // let srcMappings = Bindings.resourceMapping.workspace.uiSourceCodes();
+    // let srcFiles = Array.prototype.filter.call(srcMappings, (f) => {
+    //     return !/^(webpack:\/\/\/.\/node_modules|debugger:\/\/|chrome-extension:\/\/)/.test(f.parentURLInternal)
+    // });
 
+    let srcFiles = Bindings.debuggerWorkspaceBinding.workspace.projectsForType("network")
+        .find(p => p.idInternal === "jsSourceMaps::main")
+        .uiSourceCodesList;
+    
     await Promise.all(srcFiles.map(async (f) => {
         let file = await f.requestContent();
         if (file.content === null) file.content = file.error || "Error loading file";
