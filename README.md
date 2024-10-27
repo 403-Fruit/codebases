@@ -138,25 +138,17 @@ Chrome Devtools does not allow you to save entire folders from the sources tab, 
 - Look for a title like "DevTools - *example.com*" where *example.com* is the target site, and click inspect to open a new Devtools window.  
 - In the new devtools window, use the following snippet to generate a JSON of all the source-mapped files from the target site.  
     ```javascript
-    // Chrome update made this obsolete
-    // let srcMappings = Bindings.resourceMapping.workspace.uiSourceCodes();
-    // let srcFiles = Array.prototype.filter.call(srcMappings, (f) => {
-    //     return !/^(webpack:\/\/\/.\/node_modules|debugger:\/\/|chrome-extension:\/\/)/.test(f.parentURLInternal)
-    // });
-
-    let srcFiles = Bindings.debuggerWorkspaceBinding.workspace.projectsForType("network")
-        .find(p => p.idInternal === "jsSourceMaps::main")
-        .uiSourceCodesList;
+    let srcFiles = UI.panels.sources.workspace.uiSourceCodesForProjectType("network");
     
     await Promise.all(srcFiles.map(async (f) => {
         let file = await f.requestContent();
         if (file.content === null) file.content = file.error || "Error loading file";
-
+    
         let name = f.displayName();
         if (name === "(index)") name = "index.html";
         if (/\?/.test(name)) name = name.replace(/\?.*/, "");
-
-        let originName = f.originInternal.replace(/^https?:\/\//, "").replace(/:?[\/\\]+$/g, "").replace(/[\/\\]+/g, "_");
+    
+        let originName = f.originInternal.replace(/^(https|chrome|chrome-untrusted)?:\/\//, "").replace(/:?[\/\\]+$/g, "").replace(/[\/\\]+/g, "_");
         return {
             name: f.displayName(),
             path: f.parentURLInternal.replace(f.originInternal, ""),
@@ -168,19 +160,62 @@ Chrome Devtools does not allow you to save entire folders from the sources tab, 
 - Copy the JSON output from the previous snippet  
 - Using NodeJS, run the following snippet after modifying it with the JSON copied in the previous step.  
     ```javascript
-    const srcFiles = {}; // Replace with copied JSON
     const fs = require("fs");
     const path = require("path");
-
+    
+    const debugMode = false; // If true, dont execute any file operations
+    
+    let srcInputFile = process.argv[2];
+    if (!srcInputFile) 
+    {
+        console.error("Usage: devtools-export.js <input-file>");
+        process.exit(1);
+    }
+    
+    if (!fs.existsSync(srcInputFile))
+    {
+        if (!/[\/\\]/.test(srcInputFile) && fs.existsSync(path.join(process.env.USERPROFILE, "Downloads", srcInputFile)))
+        {
+            srcInputFile = path.join(process.env.USERPROFILE, "Downloads", srcInputFile);
+        }
+        else
+        {
+            console.error(`File '${srcInputFile}' not found.`);
+            process.exit(1);
+        }
+    }
+    
+    
+    if (debugMode)
+    {
+        fs.writeFileSync = (...args) => {
+            console.log("\x1B[31mwriteFile \x1B[90m~>\x1B[39m", path.resolve(args[0]), "|", args[1].length, "\x1B[33mbytes\x1B[39m");
+        };
+        
+        fs.mkdirSync = (...args) => {
+            console.log("\x1B[32mmkdir     \x1B[90m~>\x1B[39m", path.resolve(args[0]));
+        };
+    }
     const outDir = "./output";
     if (!fs.existsSync(outDir)) fs.mkdirSync(outDir);
-
+    
+    const srcFiles = JSON.parse(fs.readFileSync(srcInputFile, "utf8"));
+    
+    
     srcFiles.forEach((file) => {
         file.origin = file.origin.replace(/[\\\/\?\|:\*<>]/g, "");
         file.name = file.name.replace(/\?.*$/g, "").replace(/[\\\/\?\|:\*<>]/g, "");
         const destDir = path.join(outDir, file.origin, file.path).replace(/[\?\|:\*<>]/g, "");
-
-        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true }); 
+    
+        if (!fs.existsSync(destDir))
+        {
+            fs.mkdirSync(destDir, { recursive: true });
+        }
+        
+        if (file.name === "(index)")
+        {
+            file.name = "index.html";
+        }
         try {
             fs.writeFileSync(path.join(destDir, file.name), file.isEncoded ? atob(file.content) : file.content);
         } catch(e) {
